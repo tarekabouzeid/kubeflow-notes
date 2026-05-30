@@ -1,0 +1,45 @@
+# =============================================================================
+# Spark Driver ServiceAccount
+#
+# The Spark driver pod (launched by the operator) needs its OWN service account
+# with permission to create/delete executor pods and services.
+# This is separate from the notebook's default-editor SA.
+#
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: spark-driver
+  namespace: kubeflow-user-example-com
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: spark-driver-role
+  namespace: kubeflow-user-example-com
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: ["services", "configmaps"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: spark-driver-rolebinding
+  namespace: kubeflow-user-example-com
+subjects:
+  - kind: ServiceAccount
+    name: spark-driver
+    namespace: kubeflow-user-example-com
+roleRef:
+  kind: Role
+  name: spark-driver-role
+  apiGroup: rbac.authorization.k8s.io
