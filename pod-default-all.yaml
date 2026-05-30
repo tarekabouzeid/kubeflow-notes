@@ -1,0 +1,86 @@
+# =============================================================================
+# Kubeflow All-Access PodDefault
+# Covers: Pipelines, Katib, Trainer, Spark Operator, Model Registry, KServe
+# =============================================================================
+apiVersion: kubeflow.org/v1alpha1
+kind: PodDefault
+metadata:
+  name: kubeflow-access-all
+  namespace: kubeflow-user-example-com
+spec:
+  desc: "Access all Kubeflow components: Pipelines, Katib, Trainer, Spark, Model Registry, KServe"
+
+  # This label must be selected when spawning the notebook
+  selector:
+    matchLabels:
+      kubeflow-access-all: "true"
+
+  # ---------------------------------------------------------------------------
+  # Use the default-editor service account which already has profile-level RBAC
+  # managed by the Kubeflow Profile Controller.
+  # The companion rbac.yaml extends it with Spark + Trainer + Katib permissions.
+  # ---------------------------------------------------------------------------
+  serviceAccountName: default-editor
+
+  # ---------------------------------------------------------------------------
+  # Environment variables — consumed by each component's Python SDK
+  # ---------------------------------------------------------------------------
+  env:
+    # --- Kubeflow Pipelines ---
+    # SDK reads this path to inject the SA token as a Bearer header
+    - name: KF_PIPELINES_SA_TOKEN_PATH
+      value: "/var/run/secrets/ml-pipeline/token"
+    # Internal KFP API endpoint (used by kfp.Client())
+    - name: KF_PIPELINES_ENDPOINT
+      value: "http://ml-pipeline.kubeflow.svc.cluster.local:8888"
+
+    # --- Kubeflow Model Registry (Hub) ---
+    # SDK: ModelRegistry(server_address=os.environ["MODEL_REGISTRY_SERVICE"], ...)
+    - name: MODEL_REGISTRY_SERVICE
+      value: "http://model-registry-service.kubeflow.svc.cluster.local"
+    - name: MODEL_REGISTRY_PORT
+      value: "8080"
+
+    # --- KServe ---
+    # kserve.KServeClient() auto-detects in-cluster; these help scripts reference it
+    - name: KSERVE_INGRESS_HOST_PORT
+      value: "istio-ingressgateway.istio-system.svc.cluster.local"
+
+    # --- Katib ---
+    # KatibClient(namespace=...) reads this if set
+    - name: KATIB_NAMESPACE
+      value: "kubeflow-user-example-com"
+
+    # --- Trainer / Training Operator ---
+    # TrainingClient(namespace=...) reads this if set
+    - name: TRAINING_NAMESPACE
+      value: "kubeflow-user-example-com"
+
+    # --- Spark Operator ---
+    # Used by pyspark when submitting to Kubernetes
+    - name: SPARK_MASTER
+      value: "k8s://https://kubernetes.default.svc"
+    # Namespace where SparkApplication CRDs will be created
+    - name: SPARK_NAMESPACE
+      value: "kubeflow-user-example-com"
+    # Service account the Spark driver pod runs as (see spark-sa.yaml)
+    - name: SPARK_DRIVER_SA
+      value: "spark-driver"
+
+  # ---------------------------------------------------------------------------
+  # Volumes — only Pipelines needs an actual volume mount (SA token projection)
+  # All other components talk over the network using the env vars above
+  # ---------------------------------------------------------------------------
+  volumes:
+    - name: volume-ml-pipeline-token
+      projected:
+        sources:
+          - serviceAccountToken:
+              audience: pipelines.kubeflow.org
+              expirationSeconds: 7200
+              path: token
+
+  volumeMounts:
+    - mountPath: "/var/run/secrets/ml-pipeline"
+      name: volume-ml-pipeline-token
+      readOnly: true
