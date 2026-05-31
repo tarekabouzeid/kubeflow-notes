@@ -6,6 +6,58 @@
 # This is separate from the notebook's default-editor SA.
 #
 # =============================================================================
+# =============================================================================
+# Istio: allow Spark executor pods to reach the Spark Connect driver pod.
+#
+# Problem: executor pods connect to the driver (port 7078 RPC, random block-
+# manager port) before their Istio sidecar has received its mTLS certificate.
+# The connection arrives at the driver's Istio proxy as plain TCP (no SPIFFE
+# principal), so source.namespace is unknown and ns-owner-access-istio denies
+# it with "rbac_access_denied_matched_policy[none]".
+#
+# Fix:
+#   1. PeerAuthentication PERMISSIVE on Spark server pods — accept both
+#      plaintext and mTLS so executor connections are not rejected at the TLS
+#      layer.
+#   2. AuthorizationPolicy allow-all on Spark server pods — since there is no
+#      source principal to match on, we allow any source.  Access is still
+#      gated by the namespace-level ns-owner-access-istio for all other pods.
+# =============================================================================
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: spark-driver-permissive
+  namespace: kubeflow-user-example-com
+spec:
+  selector:
+    matchLabels:
+      spark-role: connect-server
+  mtls:
+    mode: PERMISSIVE
+
+---
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: allow-spark-executor-to-driver
+  namespace: kubeflow-user-example-com
+spec:
+  selector:
+    matchLabels:
+      spark-role: connect-server
+  action: ALLOW
+  rules:
+  - {}
+
+---
+# =============================================================================
+# Spark Driver ServiceAccount
+#
+# The Spark driver pod (launched by the operator) needs its OWN service account
+# with permission to create/delete executor pods and services.
+# This is separate from the notebook's default-editor SA.
+#
+# =============================================================================
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -43,3 +95,4 @@ roleRef:
   kind: Role
   name: spark-driver-role
   apiGroup: rbac.authorization.k8s.io
+
